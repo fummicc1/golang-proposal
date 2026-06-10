@@ -1,0 +1,72 @@
+name: generate-quizzes
+
+# Daily (and on-demand) regeneration of the quiz bundle from this fork's
+# design/*.md, published to the go-masked-quiz repo's cdn/ for Cloudflare Pages.
+on:
+  schedule:
+    - cron: "0 0 * * *" # daily 00:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: generate-quizzes
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync upstream golang/proposal
+        run: |
+          git remote add upstream https://github.com/golang/proposal.git || true
+          git fetch upstream
+          # design/ is not modified in this fork, so a merge of upstream is clean.
+          git merge --no-edit upstream/master || git merge --abort || true
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Generate bundle
+        run: |
+          go run github.com/fummicc1/go-masked-quiz/quizgen/cmd/quizgen@main \
+            generate \
+            --proposals ./design \
+            --out "${RUNNER_TEMP}/quizzes.json" \
+            --seed 42 \
+            --now 2026-01-01T00:00:00Z
+
+      - name: Mint GitHub App token (write to go-masked-quiz)
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: fummicc1
+          repositories: go-masked-quiz
+
+      - name: Publish to go-masked-quiz cdn/ when changed
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          git clone --depth 1 \
+            "https://x-access-token:${GH_TOKEN}@github.com/fummicc1/go-masked-quiz.git" target
+          cp "${RUNNER_TEMP}/quizzes.json" target/cdn/v3/quizzes.json
+          cd target
+          if git diff --quiet -- cdn/v3/quizzes.json; then
+            echo "No change in quizzes.json; nothing to publish."
+            exit 0
+          fi
+          git config user.name "quizgen-bot"
+          git config user.email "quizgen-bot@users.noreply.github.com"
+          git add cdn/v3/quizzes.json
+          git commit -m "chore: refresh cdn/v3/quizzes.json (automated)"
+          git push origin HEAD:main
