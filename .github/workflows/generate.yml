@@ -65,8 +65,8 @@ jobs:
             echo "No change in quizzes.json; nothing to publish."
             exit 0
           fi
-          git config user.name "quizgen-bot"
-          git config user.email "quizgen-bot@users.noreply.github.com"
+          git config user.name "fummicc1-app[bot]"
+          git config user.email "293152319+fummicc1-app[bot]@users.noreply.github.com"
           git add cdn/v3/quizzes.json
           git commit -m "chore: refresh cdn/v3/quizzes.json (automated)"
           git push origin HEAD:main
